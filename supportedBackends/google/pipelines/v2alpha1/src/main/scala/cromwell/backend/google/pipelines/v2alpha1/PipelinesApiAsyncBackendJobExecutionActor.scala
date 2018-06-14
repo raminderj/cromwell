@@ -72,7 +72,7 @@ class PipelinesApiAsyncBackendJobExecutionActor(standardParams: StandardAsyncExe
       } getOrElse {
         GcsPathBuilder.validateGcsPath(path) match {
           case _: ValidFullGcsPath => path
-          case _ => (callRootPath / path.stripPrefix("/")).pathAsString
+          case _ => (callRootPath / path.stripPrefix("file://").stripPrefix("/")).pathAsString
         }
       }
     }
