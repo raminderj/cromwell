@@ -1,0 +1,18 @@
+name: requester_pays_engine_functions_negative
+testFormat: workflowfailure
+backends: [Papiv2]
+workflowType: WDL
+workflowTypeVersion: 1.0
+tags: ["wdl_1.0"]
+
+files {
+  workflow: requester_pays_gcs/engine_functions_negative.wdl
+}
+
+metadata {
+  workflowName: requester_pays_engine_functions
+  status: Failed
+  "failures.0.message": "Workflow failed"
+  "failures.0.causedBy.0.message": ~~"centaur@broad-dsde-cromwell-dev.iam.gserviceaccount.com does not have serviceusage.services.use access"
+  "failures.0.causedBy.1.message": ~~"centaur@broad-dsde-cromwell-dev.iam.gserviceaccount.com does not have serviceusage.services.use access"
+}

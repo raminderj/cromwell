@@ -10,6 +10,7 @@ import cromwell.backend.google.pipelines.v2alpha1.ToParameter.ops._
 import cromwell.backend.google.pipelines.v2alpha1.api.ActionBuilder._
 import cromwell.backend.google.pipelines.v2alpha1.api.Delocalization._
 import cromwell.core.path.Path
+import cromwell.filesystems.gcs.GcsPathBuilder._
 
 import scala.collection.JavaConverters._
 
@@ -21,15 +22,13 @@ trait Delocalization {
 
   private def aggregatedLog = s"$logsRoot/output"
 
-  private def delocalizeLogsAction(gcsLogPath: String, projectId: String) = {
-    // To re-enable requester pays, this need to be added back: "-u", projectId
-    gsutilAsText("-m", "cp", "-r", "/google/logs", gcsLogPath)(flags = List(ActionFlag.AlwaysRun))
+  private def delocalizeLogsAction(gcsLogPath: Path, projectId: String) = {
+    gsutilAsText(gcsLogPath.requesterPaysGSUtilFlagList ++ List("cp") ++ List("-r", "/google/logs", gcsLogPath.pathAsString))(flags = List(ActionFlag.AlwaysRun))
   }
 
   // Action logs are now located in the pipelines-logs directory. The aggregated log is copied from this pipelines-logs directory.
-  private def copyAggregatedLogToLegacyPath(callExecutionContainerRoot: Path, gcsLegacyLogPath: String, projectId: String): Action = {
-    // To re-enable requester pays, this needs to be added back: "-u", projectId
-    gsutilAsText("cp", aggregatedLog, gcsLegacyLogPath)(flags = List(ActionFlag.AlwaysRun))
+  private def copyAggregatedLogToLegacyPath(callExecutionContainerRoot: Path, gcsLegacyLogPath: Path, projectId: String): Action = {
+    gsutilAsText(gcsLegacyLogPath.requesterPaysGSUtilFlagList ++ List("cp", aggregatedLog, gcsLegacyLogPath.pathAsString))(flags = List(ActionFlag.AlwaysRun))
   }
 
   private def parseOutputJsonAction(containerCallRoot: String, outputDirectory: String, outputFile: String, mounts: List[Mount]): Action = {
@@ -55,7 +54,7 @@ trait Delocalization {
       .withFlags(List(ActionFlag.DisableImagePrefetch))
   }
 
-  private def delocalizeOutputJsonFilesAction(cloudCallRoot: String, inputFile: String, mounts: List[Mount]): Action = {
+  private def delocalizeOutputJsonFilesAction(cloudCallRoot: Path, inputFile: String, mounts: List[Mount]): Action = {
     val sedStripSlashPrefix = "s/^\\///"
     val commands = List(
       "/bin/bash",
@@ -69,7 +68,7 @@ trait Delocalization {
          * We can't use the gsutil -I flag here because it would lose the directory structure once it gets copied to the bucket
          * sh -c 'gsutil cp % $(echo % | sed -e "s/^\///")'
          */
-        s""" | xargs -I % sh -c 'gsutil -m cp -r % ${cloudCallRoot.ensureSlashed}$$(echo % | sed -e "$sedStripSlashPrefix")'"""
+        s""" | xargs -I % sh -c 'gsutil -m ${cloudCallRoot.requesterPaysGSUtilFlag} cp -r % ${cloudCallRoot.pathAsString.ensureSlashed}$$(echo % | sed -e "$sedStripSlashPrefix")'"""
     )
 
     ActionBuilder
@@ -80,11 +79,11 @@ trait Delocalization {
 
   def deLocalizeActions(createPipelineParameters: CreatePipelineParameters,
                         mounts: List[Mount]): List[Action] = {
-    val cloudCallRoot = createPipelineParameters.cloudCallRoot.pathAsString
+    val cloudCallRoot = createPipelineParameters.cloudCallRoot
     val callExecutionContainerRoot = createPipelineParameters.commandScriptContainerPath.parent
 
     val gcsLogDirectoryPath = createPipelineParameters.cloudCallRoot / "pipelines-logs"
-    val gcsLegacyLogPath = createPipelineParameters.logGcsPath.pathAsString
+    val gcsLegacyLogPath = createPipelineParameters.logGcsPath
 
     /*
      * CWL specific delocalization. For now this always runs, even for WDL jobs.
@@ -101,6 +100,6 @@ trait Delocalization {
     createPipelineParameters.outputParameters.flatMap(_.toActions(mounts, projectId).toList) ++
       List(parseAction, delocalizeAction) :+
       copyAggregatedLogToLegacyPath(callExecutionContainerRoot, gcsLegacyLogPath, projectId) :+
-      delocalizeLogsAction(gcsLogDirectoryPath.pathAsString, projectId)
+      delocalizeLogsAction(gcsLogDirectoryPath, projectId)
   }
 }

@@ -7,8 +7,8 @@ import cromwell.backend.io.WorkflowPaths
 import cromwell.backend.{BackendJobDescriptorKey, BackendWorkflowDescriptor}
 import cromwell.cloudsupport.gcp.gcs.GcsStorage
 import cromwell.core.WorkflowOptions
-import cromwell.core.path.Path
 import cromwell.core.path.PathFactory.PathBuilders
+import cromwell.core.path.{Path, RequesterPaysCachedPathBuilder}
 import cromwell.filesystems.gcs.GcsPathBuilder
 
 import scala.language.postfixOps
@@ -23,6 +23,9 @@ case class PipelinesApiWorkflowPaths(workflowDescriptor: BackendWorkflowDescript
                                      genomicsCredentials: Credentials,
                                      papiConfiguration: PipelinesApiConfiguration,
                                      override val pathBuilders: PathBuilders) extends WorkflowPaths {
+  private val requesterPaysCache = pathBuilders.collectFirst({
+    case gcsPathBuilder: GcsPathBuilder => gcsPathBuilder.requesterPaysCache
+  }).getOrElse(RequesterPaysCachedPathBuilder.noCache)
 
   override lazy val executionRootString: String =
     workflowDescriptor.workflowOptions.getOrElse(PipelinesApiWorkflowPaths.GcsRootOptionKey, papiConfiguration.root)
@@ -44,7 +47,8 @@ case class PipelinesApiWorkflowPaths(workflowDescriptor: BackendWorkflowDescript
       RetrySettings.newBuilder().build(),
       GcsStorage.DefaultCloudStorageConfiguration,
       workflowOptions,
-      Option(papiConfiguration.jesAttributes.project)
+      Option(papiConfiguration.jesAttributes.project),
+      requesterPaysCache
     )
 
     val authBucket = pathBuilderWithGenomicsAuth.build(bucket) recover {

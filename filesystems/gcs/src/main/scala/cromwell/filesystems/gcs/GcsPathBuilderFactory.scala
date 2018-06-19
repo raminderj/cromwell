@@ -2,6 +2,7 @@ package cromwell.filesystems.gcs
 
 import akka.actor.ActorSystem
 import com.google.api.gax.retrying.RetrySettings
+import com.google.common.cache.CacheBuilder
 import com.typesafe.config.Config
 import common.validation.ErrorOr.ErrorOr
 import common.validation.Validation._
@@ -14,6 +15,7 @@ import cromwell.filesystems.gcs.GcsPathBuilderFactory.DefaultRetrySettings
 import org.threeten.bp.Duration
 
 import scala.concurrent.ExecutionContext
+import scala.concurrent.duration._
 
 final case class GcsPathBuilderFactory(globalConfig: Config, instanceConfig: Config)
   extends PathBuilderFactory {
@@ -30,8 +32,15 @@ final case class GcsPathBuilderFactory(globalConfig: Config, instanceConfig: Con
 
   val defaultProject = instanceConfig.as[Option[String]]("project")
 
+  val requesterPaysCacheTTL = instanceConfig.as[Option[FiniteDuration]]("requester-pays-cache-ttl").getOrElse(30.minutes)
+
+  val requesterPaysCache = CacheBuilder
+    .newBuilder()
+    .expireAfterWrite(requesterPaysCacheTTL.length, requesterPaysCacheTTL.unit)
+    .build[String, java.lang.Boolean]()
+
   def withOptions(options: WorkflowOptions)(implicit as: ActorSystem, ec: ExecutionContext) = {
-    GcsPathBuilder.fromAuthMode(authMode, applicationName, DefaultRetrySettings, GcsStorage.DefaultCloudStorageConfiguration, options, defaultProject)
+    GcsPathBuilder.fromAuthMode(authMode, applicationName, DefaultRetrySettings, GcsStorage.DefaultCloudStorageConfiguration, options, defaultProject, requesterPaysCache)
   }
 }
 

@@ -24,7 +24,8 @@ class GcsPathBuilderSpec extends TestKitSuite with FlatSpecLike with Matchers wi
       RetrySettings.newBuilder().build(),
       CloudStorageConfiguration.DEFAULT,
       wfOptionsWithProject,
-      Option("default_project")
+      Option("default_project"),
+      RequesterPaysCachedPathBuilder.noCache
     )
 
     gcsPathBuilderWithProjectInfo.projectId shouldBe "my_project"
@@ -321,7 +322,8 @@ class GcsPathBuilderSpec extends TestKitSuite with FlatSpecLike with Matchers wi
       RetrySettings.newBuilder().build(),
       CloudStorageConfiguration.DEFAULT,
       WorkflowOptions.empty,
-      Option("default_project")
+      Option("default_project"),
+      RequesterPaysCachedPathBuilder.noCache
     )
   }
 }

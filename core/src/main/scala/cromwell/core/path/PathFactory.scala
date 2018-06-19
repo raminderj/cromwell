@@ -39,7 +39,8 @@ object PathFactory {
                 pathBuilders: List[PathBuilder],
                 preMapping: String => String = identity[String],
                 postMapping: Path => Path = identity[Path]): Path = {
-    pathBuilders.toStream map { _.build(preMapping(string)) } collectFirst { case Success(p) => postMapping(p) } getOrElse {
+    val paths = pathBuilders map { _.build(preMapping(string)) }
+    paths collectFirst { case Success(p) => postMapping(p) } getOrElse {
       val pathBuilderNames: String = pathBuilders map { _.name } mkString ", "
       throw PathParsingException(
         s"$string exists on a filesystem not supported by this instance of Cromwell." +

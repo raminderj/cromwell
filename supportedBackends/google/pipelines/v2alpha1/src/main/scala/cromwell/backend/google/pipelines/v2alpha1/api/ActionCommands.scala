@@ -3,6 +3,7 @@ import common.util.StringUtil._
 import cromwell.core.path.Path
 import mouse.all._
 import org.apache.commons.text.StringEscapeUtils.ESCAPE_XSI
+import cromwell.filesystems.gcs.GcsPathBuilder._
 
 /**
   * Utility methods to build shell commands for localization / delocalization.
@@ -16,7 +17,7 @@ object ActionCommands {
   def makeContainerDirectory(containerPath: Path) = s"mkdir -p ${containerPath.escape}"
 
   def delocalizeDirectory(containerPath: Path, cloudPath: Path) = {
-    s"gsutil -m rsync -r ${containerPath.escape} ${cloudPath.escape}"
+    s"gsutil ${cloudPath.requesterPaysGSUtilFlag} -m rsync -r ${containerPath.escape} ${cloudPath.escape}"
   }
 
   /*
@@ -32,7 +33,7 @@ object ActionCommands {
    * So the final gsutil command will look something like gsutil cp /local/file.txt gs://bucket/subdir/
    */
   def delocalizeFile(containerPath: Path, cloudPath: Path) = {
-    s"gsutil cp ${containerPath.escape} ${cloudPath.parent.escape.ensureSlashed}"
+    s"gsutil ${cloudPath.requesterPaysGSUtilFlag} cp ${containerPath.escape} ${cloudPath.parent.escape.ensureSlashed}"
   }
 
   def ifExist(containerPath: Path)(f: => String) = s"if [[ -e ${containerPath.escape} ]]; then $f; fi"
@@ -42,10 +43,10 @@ object ActionCommands {
   }
 
   def localizeDirectory(cloudPath: Path, containerPath: Path) = {
-    s"${containerPath |> makeContainerDirectory} && gsutil -m rsync -r ${cloudPath.escape} ${containerPath.escape}"
+    s"${containerPath |> makeContainerDirectory} && gsutil ${cloudPath.requesterPaysGSUtilFlag} -m rsync -r ${cloudPath.escape} ${containerPath.escape}"
   }
 
   def localizeFile(cloudPath: Path, containerPath: Path) = {
-    s"gsutil cp ${cloudPath.escape} ${containerPath.escape}"
+    s"gsutil ${cloudPath.requesterPaysGSUtilFlag} cp ${cloudPath.escape} ${containerPath.escape}"
   }
 }

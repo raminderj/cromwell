@@ -27,7 +27,7 @@ import cromwell.core._
 import cromwell.core.callcaching.NoDocker
 import cromwell.core.labels.Labels
 import cromwell.core.logging.JobLogger
-import cromwell.core.path.{DefaultPathBuilder, PathBuilder}
+import cromwell.core.path.{DefaultPathBuilder, PathBuilder, RequesterPaysCachedPathBuilder}
 import cromwell.filesystems.gcs.{GcsPath, GcsPathBuilder}
 import cromwell.services.keyvalue.InMemoryKvServiceActor
 import cromwell.services.keyvalue.KeyValueServiceActor.{KvJobKey, KvPair, ScopedKey}
@@ -54,7 +54,7 @@ import scala.util.Success
 class PipelinesApiAsyncBackendJobExecutionActorSpec extends TestKitSuite("JesAsyncBackendJobExecutionActorSpec")
   with FlatSpecLike with Matchers with ImplicitSender with Mockito with BackendSpec with BeforeAndAfter with DefaultJsonProtocol {
   val mockPathBuilder: GcsPathBuilder = GcsPathBuilder.fromCredentials(NoCredentials.getInstance(),
-    "test-cromwell", RetrySettings.newBuilder().build(), GcsStorage.DefaultCloudStorageConfiguration, WorkflowOptions.empty, Option("default_project") )
+    "test-cromwell", RetrySettings.newBuilder().build(), GcsStorage.DefaultCloudStorageConfiguration, WorkflowOptions.empty, Option("default_project"), RequesterPaysCachedPathBuilder.noCache)
 
   var kvService: ActorRef = system.actorOf(Props(new InMemoryKvServiceActor))
 

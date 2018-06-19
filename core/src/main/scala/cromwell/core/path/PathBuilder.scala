@@ -1,11 +1,43 @@
 package cromwell.core.path
 
+import java.nio.file.FileSystem
+
+import com.google.common.cache.{Cache, CacheBuilder}
+
 import scala.util.Try
 
 trait PathBuilder {
   def name: String
 
   def build(pathAsString: String): Try[Path]
+}
+
+object RequesterPaysCachedPathBuilder {
+  val noCache = CacheBuilder.newBuilder().maximumSize(0).build[String, java.lang.Boolean]()
+}
+
+trait RequesterPaysCachedPathBuilder[A <: FileSystem] { this: PathBuilder =>
+  /**
+    * Given a bucket, returns whether or not requester pays is required on it.
+    * This should involve an http call to the cloud filesystem to determine the value.
+    */
+  protected def isRequesterPaysCall(bucket: String): Boolean
+
+  protected def requesterPaysCache: Cache[String, java.lang.Boolean]
+
+  private def getRequesterPays(bucket: String) = Option(requesterPaysCache.getIfPresent(bucket))
+    .map(_.booleanValue())
+    .getOrElse({
+      val requesterPays = isRequesterPaysCall(bucket)
+      requesterPaysCache.put(bucket, new java.lang.Boolean(requesterPays))
+      requesterPays
+    })
+
+  /**
+    * Returns true if the bucket has requester pays, false otherwise.
+    * Use the cached value if present, otherwise updates it using [[isRequesterPaysCall]]
+    */
+  final def isRequesterPaysCached(bucket: String): Boolean = getRequesterPays(bucket)
 }
 
 /**
@@ -117,4 +149,6 @@ trait Path extends PathObjectMethods with NioPathMethods with BetterFileMethods 
 
   // Some Path methods return null.
   private[path] final def newPathOrNull(nioPath: NioPath) = Option(nioPath).map(newPath).orNull
+
+  def requesterPays: Boolean
 }
