@@ -10,7 +10,7 @@ files {
 }
 
 metadata {
-  workflowName: requester_pays_localization
+  workflowName: requester_pays_localization_negative
   status: Failed
   "failures.0.message": "Workflow failed"
   "failures.0.causedBy.0.message": ~~"centaur@broad-dsde-cromwell-dev.iam.gserviceaccount.com does not have serviceusage.services.use access"

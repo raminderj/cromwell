@@ -1,6 +1,6 @@
 version 1.0
 
-workflow requester_pays_engine_functions {
+workflow requester_pays_engine_functions_negative {
     File input_file = "gs://cromwell_bucket_with_requester_pays/lorem ipsum.txt"
     call functions {
         input: input_string = read_string(input_file),

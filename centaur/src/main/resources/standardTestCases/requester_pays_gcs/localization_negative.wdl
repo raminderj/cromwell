@@ -1,6 +1,6 @@
 version 1.0
 
-workflow requester_pays_localization {
+workflow requester_pays_localization_negative {
     File input_file = "gs://cromwell_bucket_with_requester_pays/lorem ipsum.txt"
     call localize { input: f = input_file }
     output {
