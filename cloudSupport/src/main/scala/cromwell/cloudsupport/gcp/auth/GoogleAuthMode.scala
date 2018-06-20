@@ -77,10 +77,14 @@ object GoogleAuthMode {
       .setApplicationName("cromwell")
       .build()
   }
-  private val keyRingId = "tj-private-dockerhub-test"
-  private val locationId = "global"
-  val cryptoKeyId = "tj-private-dockerhub-key"
-  val keyName = s"projects/broad-dsde-cromwell-perf/locations/$locationId/keyRings/$keyRingId/cryptoKeys/$cryptoKeyId"
+
+  val keyName = {
+    val locationId = "global"
+    val keyRingId = "tj-private-dockerhub-test"
+    val cryptoKeyId = "tj-private-dockerhub-key"
+
+    s"projects/broad-dsde-cromwell-perf/locations/$locationId/keyRings/$keyRingId/cryptoKeys/$cryptoKeyId"
+  }
   def encryptKms(plainText: String) = {
     import com.google.api.services.cloudkms.v1.model.EncryptRequest
     val request = new EncryptRequest().encodePlaintext(plainText.toCharArray.map(_.toByte))
