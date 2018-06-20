@@ -12,17 +12,19 @@ import better.files.File.OpenOptions
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
 import com.google.api.gax.retrying.RetrySettings
 import com.google.auth.Credentials
-import com.google.cloud.storage.Storage.{BlobSourceOption, BlobTargetOption, BucketField, BucketGetOption}
+import com.google.cloud.storage.Storage.{BlobSourceOption, BlobTargetOption}
 import com.google.cloud.storage.contrib.nio.{CloudStorageConfiguration, CloudStorageFileSystem, CloudStoragePath}
-import com.google.cloud.storage.{BlobId, BlobInfo, StorageException, StorageOptions}
-import com.google.common.cache.Cache
+import com.google.cloud.storage.{BlobId, BlobInfo, StorageOptions}
+import com.google.common.cache.{Cache, CacheBuilder}
 import com.google.common.net.UrlEscapers
 import cromwell.cloudsupport.gcp.auth.GoogleAuthMode
 import cromwell.cloudsupport.gcp.gcs.GcsStorage
 import cromwell.core.WorkflowOptions
-import cromwell.core.path.{NioPath, Path, PathBuilder, RequesterPaysCachedPathBuilder}
+import cromwell.core.path.cache.BucketCache.DefaultBucketInformation
+import cromwell.core.path.{NioPath, Path, PathBuilder}
 import cromwell.filesystems.gcs.GcsPathBuilder._
 import cromwell.filesystems.gcs.GoogleUtil._
+import cromwell.filesystems.gcs.batch.{GcsBucketCache, GcsFileSystemCache}
 import cromwell.util.TryWithResource._
 import mouse.all._
 
@@ -116,7 +118,7 @@ object GcsPathBuilder {
                    cloudStorageConfiguration: CloudStorageConfiguration,
                    options: WorkflowOptions,
                    defaultProject: Option[String],
-                   requesterPaysCache: Cache[String, java.lang.Boolean])(implicit as: ActorSystem, ec: ExecutionContext): Future[GcsPathBuilder] = {
+                   requesterPaysCache: Cache[String, DefaultBucketInformation])(implicit as: ActorSystem, ec: ExecutionContext): Future[GcsPathBuilder] = {
     authMode.retryCredential(options) map { credentials =>
       fromCredentials(credentials,
         applicationName,
@@ -135,7 +137,7 @@ object GcsPathBuilder {
                       cloudStorageConfiguration: CloudStorageConfiguration,
                       options: WorkflowOptions,
                       defaultProject: Option[String],
-                      requesterPaysCache: Cache[String, java.lang.Boolean]): GcsPathBuilder = {
+                      requesterPaysCache: Cache[String, DefaultBucketInformation]): GcsPathBuilder = {
     // Grab the google project from Workflow Options if specified and set
     // that to be the project used by the StorageOptions Builder. If it's not
     // specified use the default project mentioned in config file
@@ -158,13 +160,12 @@ object GcsPathBuilder {
 class GcsPathBuilder(apiStorage: com.google.api.services.storage.Storage,
                      cloudStorageConfiguration: CloudStorageConfiguration,
                      storageOptions: StorageOptions,
-                     override val requesterPaysCache: Cache[String, java.lang.Boolean]) extends PathBuilder with RequesterPaysCachedPathBuilder[CloudStorageFileSystem] {
-  private lazy val cloudStorage = storageOptions.getService
+                     val bucketCacheGuava: Cache[String, DefaultBucketInformation]) extends PathBuilder {
+  private [gcs] val bucketCache = new GcsBucketCache(cloudStorage, bucketCacheGuava)
+  // We can cache filesystems per bucket objects here since they only depend on the bucket (and the credentials, which are unique per path builder)
+  private [gcs] val fileSystemCache = new GcsFileSystemCache(cloudStorage, CacheBuilder.newBuilder().build[String, CloudStorageFileSystem](), cloudStorageConfiguration, storageOptions)
 
-  // This could be cached too, per path builder
-  def makeFileSystem(bucket: String) = {
-    CloudStorageFileSystem.forBucket(bucket, cloudStorageConfiguration, storageOptions)
-  }
+  private lazy val cloudStorage = storageOptions.getService
 
   private[gcs] val projectId = storageOptions.getProjectId
 
@@ -182,9 +183,9 @@ class GcsPathBuilder(apiStorage: com.google.api.services.storage.Storage,
     validateGcsPath(string) match {
       case ValidFullGcsPath(bucket, path) =>
         Try {
-          val fileSystem = makeFileSystem(bucket)
+          val fileSystem = fileSystemCache.getCachedValue(bucket)
           val cloudStoragePath = fileSystem.getPath(path)
-          val requesterPays = isRequesterPaysCached(bucket)
+          val requesterPays = bucketCache.getCachedValue(bucket).requesterPays
           GcsPath(cloudStoragePath, apiStorage, cloudStorage, projectId, requesterPays)
         }
       case PossiblyValidRelativeGcsPath => Failure(new IllegalArgumentException(s"$string does not have a gcs scheme"))
@@ -193,33 +194,6 @@ class GcsPathBuilder(apiStorage: com.google.api.services.storage.Storage,
   }
 
   override def name: String = "Google Cloud Storage"
-
-  // This is a synchronous call to GCS but would be too complex to truly asynchronify for now
-  override protected def isRequesterPaysCall(bucket: String) = {
-    /*
-     * It turns out that making a request to determine if a bucket has requester pays, when the the bucket indeed has it enabled,
-     * fails without passing a billing project..
-     * I see 2 options:
-     * 1) Always pass a billing project for that request (potentially occurring unnecessary cost, but allowing to get the real value from the object metadata)
-     * 2) Try without billing project and parse the failure to see if it was due to the bucket having requester pays
-     * 
-     * Going with 2 for now.
-     */
-    Try(cloudStorage.get(bucket, BucketGetOption.fields(BucketField.ID)))
-      // If it works, it means requester pays is not required since we did not specify a project ID. Use the ID field to limit the size of the response.
-      .map(_ => false)
-      .recover({
-        case storageException: StorageException if storageException.getCode == 400 &&
-          storageException.getMessage.contains("Bucket is requester pays bucket but no user project provided") => true
-      })
-      /*
-       * If it fails for some other reason (for instance the path does not exist), return false.
-       * We want to avoid throwing here because we're only trying to determine a value for requester pays when building
-       * paths from this bucket, we can't want to make assumptions on what paths are going to be built from this bucket
-       * and for what purpose.
-       */
-      .toOption.getOrElse(false)
-  }
 }
 
 case class GcsPath private[gcs](nioPath: NioPath,
@@ -229,8 +203,13 @@ case class GcsPath private[gcs](nioPath: NioPath,
                                 requesterPays: Boolean) extends Path {
   lazy val blob = BlobId.of(cloudStoragePath.bucket, cloudStoragePath.toRealPath().toString)
 
-  // Will be null if requesterPays is false
+  /**
+    * Will be null if requesterPays is false 
+    */
   val requesterPaysProject = requesterPays.option(projectId).orNull
+
+  private lazy val userProjectBlobTarget: List[BlobTargetOption] = requesterPays.option(BlobTargetOption.userProject(projectId)).toList
+  private lazy val userProjectBlobSource: List[BlobSourceOption] = requesterPays.option(BlobSourceOption.userProject(projectId)).toList
 
   override protected def newPath(nioPath: NioPath): GcsPath = GcsPath(nioPath, apiStorage, cloudStorage, projectId, requesterPays)
 
@@ -246,7 +225,7 @@ case class GcsPath private[gcs](nioPath: NioPath,
         .setContentType(ContentTypes.`text/plain(UTF-8)`.value)
         .build(),
       content.getBytes(codec.charSet),
-      BlobTargetOption.userProject(requesterPaysProject)
+      userProjectBlobTarget: _*
     )
     this
   }
@@ -260,7 +239,7 @@ case class GcsPath private[gcs](nioPath: NioPath,
     */
   override def mediaInputStream: InputStream = {
     Try{
-      Channels.newInputStream(cloudStorage.reader(blob, BlobSourceOption.userProject(requesterPaysProject)))
+      Channels.newInputStream(cloudStorage.reader(blob, userProjectBlobSource: _*))
     } match {
       case Success(inputStream) => inputStream
       case Failure(e: GoogleJsonResponseException) if e.getStatusCode == StatusCodes.NotFound.intValue =>

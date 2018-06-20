@@ -7,8 +7,9 @@ import cromwell.backend.io.WorkflowPaths
 import cromwell.backend.{BackendJobDescriptorKey, BackendWorkflowDescriptor}
 import cromwell.cloudsupport.gcp.gcs.GcsStorage
 import cromwell.core.WorkflowOptions
+import cromwell.core.path.Path
 import cromwell.core.path.PathFactory.PathBuilders
-import cromwell.core.path.{Path, RequesterPaysCachedPathBuilder}
+import cromwell.core.path.cache.BucketCache
 import cromwell.filesystems.gcs.GcsPathBuilder
 
 import scala.language.postfixOps
@@ -23,10 +24,6 @@ case class PipelinesApiWorkflowPaths(workflowDescriptor: BackendWorkflowDescript
                                      genomicsCredentials: Credentials,
                                      papiConfiguration: PipelinesApiConfiguration,
                                      override val pathBuilders: PathBuilders) extends WorkflowPaths {
-  private val requesterPaysCache = pathBuilders.collectFirst({
-    case gcsPathBuilder: GcsPathBuilder => gcsPathBuilder.requesterPaysCache
-  }).getOrElse(RequesterPaysCachedPathBuilder.noCache)
-
   override lazy val executionRootString: String =
     workflowDescriptor.workflowOptions.getOrElse(PipelinesApiWorkflowPaths.GcsRootOptionKey, papiConfiguration.root)
 
@@ -36,6 +33,11 @@ case class PipelinesApiWorkflowPaths(workflowDescriptor: BackendWorkflowDescript
     // The default auth file bucket is always at the root of the root workflow
     val defaultBucket = executionRoot.resolve(workflowDescriptor.rootWorkflow.name).resolve(workflowDescriptor.rootWorkflowId.toString)
     val bucket = workflowDescriptor.workflowOptions.get(PipelinesApiWorkflowPaths.AuthFilePathOptionKey) getOrElse defaultBucket.pathAsString
+
+    // Use the cache from the already existing path builder here (there should be a GcsPathBuilder but default to noCache if not)
+    val requesterPaysCache = pathBuilders.collectFirst({
+      case gcsPathBuilder: GcsPathBuilder => gcsPathBuilder.bucketCacheGuava
+    }).getOrElse(BucketCache.noCache)
 
     /*
      * This is an "exception". The filesystem used here is built from genomicsAuth

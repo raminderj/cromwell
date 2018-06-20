@@ -11,6 +11,7 @@ import cromwell.cloudsupport.gcp.auth.GoogleAuthMode
 import cromwell.cloudsupport.gcp.gcs.GcsStorage
 import cromwell.core.WorkflowOptions
 import cromwell.core.path.PathBuilderFactory
+import cromwell.core.path.cache.BucketCache.DefaultBucketInformation
 import cromwell.filesystems.gcs.GcsPathBuilderFactory.DefaultRetrySettings
 import org.threeten.bp.Duration
 
@@ -33,14 +34,18 @@ final case class GcsPathBuilderFactory(globalConfig: Config, instanceConfig: Con
   val defaultProject = instanceConfig.as[Option[String]]("project")
 
   val requesterPaysCacheTTL = instanceConfig.as[Option[FiniteDuration]]("requester-pays-cache-ttl").getOrElse(30.minutes)
-
-  val requesterPaysCache = CacheBuilder
+  
+  /*
+   * The requester pays cache can be shared across all path builders.
+   * That is because whether or not a bucket is requester pays is independent from the credentials used.
+   */
+  val requesterPaysGuavaCache = CacheBuilder
     .newBuilder()
     .expireAfterWrite(requesterPaysCacheTTL.length, requesterPaysCacheTTL.unit)
-    .build[String, java.lang.Boolean]()
+    .build[String, DefaultBucketInformation]()
 
   def withOptions(options: WorkflowOptions)(implicit as: ActorSystem, ec: ExecutionContext) = {
-    GcsPathBuilder.fromAuthMode(authMode, applicationName, DefaultRetrySettings, GcsStorage.DefaultCloudStorageConfiguration, options, defaultProject, requesterPaysCache)
+    GcsPathBuilder.fromAuthMode(authMode, applicationName, DefaultRetrySettings, GcsStorage.DefaultCloudStorageConfiguration, options, defaultProject, requesterPaysGuavaCache)
   }
 }
 
