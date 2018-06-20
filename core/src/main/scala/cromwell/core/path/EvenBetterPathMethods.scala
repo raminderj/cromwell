@@ -4,6 +4,8 @@ import java.io.InputStream
 import java.nio.file.{FileAlreadyExistsException, Files}
 import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
 
+import better.files.File.OpenOptions
+
 import scala.collection.JavaConverters._
 import scala.io.Codec
 
@@ -86,6 +88,8 @@ trait EvenBetterPathMethods {
   final def tailed(tailedSize: Int) = TailedWriter(this, tailedSize)
 
   def mediaInputStream: InputStream = newInputStream
+
+  def writeContent(content: String)(openOptions: OpenOptions, codec: Codec): this.type = write(content)(openOptions, Codec.UTF8)
 
   def readContentAsString(implicit codec: Codec): String = contentAsString
 

@@ -17,7 +17,6 @@ task localize {
         cat "~{f}" > out.txt
     }
     runtime {
-        backend: "Papiv2RequesterPays"
         docker: "ubuntu"
     }
     output {

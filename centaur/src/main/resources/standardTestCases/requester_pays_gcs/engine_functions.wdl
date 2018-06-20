@@ -2,6 +2,7 @@ version 1.0
 
 workflow requester_pays_engine_functions {
     File input_file = "gs://cromwell_bucket_with_requester_pays/lorem ipsum.txt"
+    File something = write_lines(["hello"])
     call functions {
         input: input_string = read_string(input_file),
                input_size = size(input_file)
@@ -22,7 +23,6 @@ task functions {
         echo ~{input_size}
     }
     runtime {
-        backend: "Papiv2RequesterPays"
         docker: "ubuntu"
     }
     output {

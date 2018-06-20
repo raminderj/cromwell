@@ -68,7 +68,7 @@ class NioFlow(parallelism: Int,
 
   private def write(write: IoWriteCommand) = Future {
     createDirectoriesForSFSPath(write.file)
-    write.file.write(write.content)(write.openOptions, Codec.UTF8)
+    write.file.writeContent(write.content)(write.openOptions, Codec.UTF8)
     ()
   }
 

@@ -7,6 +7,7 @@ tags: ["wdl_1.0"]
 
 files {
   workflow: requester_pays_gcs/localization.wdl
+  options: requester_pays_gcs/localization.options
 }
 
 metadata {

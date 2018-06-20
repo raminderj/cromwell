@@ -2,17 +2,19 @@ package cromwell.filesystems.gcs
 
 import java.io._
 import java.net.URI
+import java.nio.channels.Channels
 import java.nio.charset.Charset
 import java.nio.file.NoSuchFileException
 
 import akka.actor.ActorSystem
-import akka.http.scaladsl.model.StatusCodes
+import akka.http.scaladsl.model.{ContentTypes, StatusCodes}
+import better.files.File.OpenOptions
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
 import com.google.api.gax.retrying.RetrySettings
 import com.google.auth.Credentials
-import com.google.cloud.storage.Storage.{BucketField, BucketGetOption}
+import com.google.cloud.storage.Storage.{BlobSourceOption, BlobTargetOption, BucketField, BucketGetOption}
 import com.google.cloud.storage.contrib.nio.{CloudStorageConfiguration, CloudStorageFileSystem, CloudStoragePath}
-import com.google.cloud.storage.{BlobId, StorageException, StorageOptions}
+import com.google.cloud.storage.{BlobId, BlobInfo, StorageException, StorageOptions}
 import com.google.common.cache.Cache
 import com.google.common.net.UrlEscapers
 import cromwell.cloudsupport.gcp.auth.GoogleAuthMode
@@ -182,7 +184,8 @@ class GcsPathBuilder(apiStorage: com.google.api.services.storage.Storage,
         Try {
           val fileSystem = makeFileSystem(bucket)
           val cloudStoragePath = fileSystem.getPath(path)
-          GcsPath(cloudStoragePath, apiStorage, cloudStorage, projectId, isRequesterPaysCached(bucket))
+          val requesterPays = isRequesterPaysCached(bucket)
+          GcsPath(cloudStoragePath, apiStorage, cloudStorage, projectId, requesterPays)
         }
       case PossiblyValidRelativeGcsPath => Failure(new IllegalArgumentException(s"$string does not have a gcs scheme"))
       case invalid: InvalidGcsPath => Failure(new IllegalArgumentException(invalid.errorMessage))
@@ -197,7 +200,7 @@ class GcsPathBuilder(apiStorage: com.google.api.services.storage.Storage,
      * It turns out that making a request to determine if a bucket has requester pays, when the the bucket indeed has it enabled,
      * fails without passing a billing project..
      * I see 2 options:
-     * 1) Always pass a billing project for that request (potentially occurring unnecessary cost, but allowing to get the information from the object metadata)
+     * 1) Always pass a billing project for that request (potentially occurring unnecessary cost, but allowing to get the real value from the object metadata)
      * 2) Try without billing project and parse the failure to see if it was due to the bucket having requester pays
      * 
      * Going with 2 for now.
@@ -208,7 +211,14 @@ class GcsPathBuilder(apiStorage: com.google.api.services.storage.Storage,
       .recover({
         case storageException: StorageException if storageException.getCode == 400 &&
           storageException.getMessage.contains("Bucket is requester pays bucket but no user project provided") => true
-      }).get
+      })
+      /*
+       * If it fails for some other reason (for instance the path does not exist), return false.
+       * We want to avoid throwing here because we're only trying to determine a value for requester pays when building
+       * paths from this bucket, we can't want to make assumptions on what paths are going to be built from this bucket
+       * and for what purpose.
+       */
+      .toOption.getOrElse(false)
   }
 }
 
@@ -230,6 +240,17 @@ case class GcsPath private[gcs](nioPath: NioPath,
     s"${CloudStorageFileSystem.URI_SCHEME}://$host/$path"
   }
 
+  override def writeContent(content: String)(openOptions: OpenOptions, codec: Codec) = {
+    cloudStorage.create(
+      BlobInfo.newBuilder(blob)
+        .setContentType(ContentTypes.`text/plain(UTF-8)`.value)
+        .build(),
+      content.getBytes(codec.charSet),
+      BlobTargetOption.userProject(requesterPaysProject)
+    )
+    this
+  }
+
   /***
     * This method needs to be overridden to make it work with requester pays. We need to go around Nio
     * as currently it doesn't support to set the billing project id. Google Cloud Storage already has
@@ -239,10 +260,10 @@ case class GcsPath private[gcs](nioPath: NioPath,
     */
   override def mediaInputStream: InputStream = {
     Try{
-      apiStorage.objects().get(blob.getBucket, blob.getName).setUserProject(requesterPaysProject).executeMediaAsInputStream()
+      Channels.newInputStream(cloudStorage.reader(blob, BlobSourceOption.userProject(requesterPaysProject)))
     } match {
       case Success(inputStream) => inputStream
-      case Failure(e: GoogleJsonResponseException) if e.getStatusCode == StatusCodes.NotFound.intValue => 
+      case Failure(e: GoogleJsonResponseException) if e.getStatusCode == StatusCodes.NotFound.intValue =>
         throw new NoSuchFileException(pathAsString)
       case Failure(e) => e.getMessage
         throw new IOException(s"Failed to open an input stream for $pathAsString: ${e.getMessage}", e)
@@ -257,7 +278,7 @@ case class GcsPath private[gcs](nioPath: NioPath,
     * wherever necessary
     */
   override def readContentAsString(implicit codec: Codec): String = {
-    openInputStream(readLinesAsString)
+    withInputStream(readLinesAsString)
   }
 
   private def readLinesAsString(inputStream: InputStream)(implicit codec: Codec): String = {
@@ -272,20 +293,19 @@ case class GcsPath private[gcs](nioPath: NioPath,
     * it's available. In future when it is supported, remove this method and wire billing project into code
     * wherever necessary
     */
-  override def readAllLinesInFile(implicit codec: Codec): Traversable[String] = {
-    openInputStream(readLinesAsStringTraversable)
-  }
-
-  private def readLinesAsStringTraversable(inputStream: InputStream)(implicit codec: Codec): Traversable[String] = {
-    val reader = new BufferedReader(new InputStreamReader(inputStream, codec.name))
+  override def readAllLinesInFile(implicit codec: Codec): Traversable[String] = withInputStream { is =>
+    val reader = new BufferedReader(new InputStreamReader(is, codec.name))
     Stream.continually(reader.readLine()).takeWhile(_ != null).toList
   }
 
-  private def openInputStream[A](f: InputStream => A): A = {
-    val storageObject = apiStorage.objects().get(blob.getBucket, blob.getName).setUserProject(requesterPaysProject)
-    val output = tryWithResource(() => storageObject.executeMediaAsInputStream())(inputStream => f(inputStream))
-
-    output.getOrElse(throw new IOException(s"Failed to open an input stream for $pathAsString"))
+  /*
+   * The input stream will be closed when this method returns, which means the f function
+   * cannot leak an open stream.
+   */
+  private def withInputStream[A](f: InputStream => A): A = {
+    tryWithResource(() => mediaInputStream)(inputStream => f(inputStream)).recoverWith({
+      case failure => Failure(new IOException(s"Failed to open an input stream for $pathAsString", failure))
+    }).get
   }
 
   override def pathWithoutScheme: String = {
