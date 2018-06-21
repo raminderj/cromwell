@@ -10,7 +10,7 @@ object DockerCredentials {
 /**
   * Encapsulate docker credential information.
   */
-class DockerCredentials(val account: String, val token: String)
+class DockerCredentials(val account: String, val token: String, val username: Option[String], val password: Option[String])
 
 case class BackendDockerConfiguration(dockerCredentials: Option[DockerCredentials])
 
@@ -28,7 +28,9 @@ object BackendDockerConfiguration {
       _ = dockerConf.warnNotRecognized(dockerKeys, "dockerhub")
       account <- dockerConf.validateString("account").toOption
       token <- dockerConf.validateString("token").toOption
-    } yield new DockerCredentials(account, token)
+      username = dockerConf.as[Option[String]]("username")
+      password = dockerConf.as[Option[String]]("password")
+    } yield new DockerCredentials(account, token, username, password)
 
     new BackendDockerConfiguration(dockerConf)
   }

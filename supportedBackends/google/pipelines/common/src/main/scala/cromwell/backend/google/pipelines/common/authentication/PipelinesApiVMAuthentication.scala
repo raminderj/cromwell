@@ -28,14 +28,17 @@ case class GcsLocalizing(clientSecrets: ClientSecrets, token: String) extends Pi
 }
 
 object PipelinesApiDockerCredentials {
-  def apply(dockerCredentials: DockerCredentials): PipelinesApiDockerCredentials = apply(dockerCredentials.account, dockerCredentials.token)
-  def apply(account: String, token: String): PipelinesApiDockerCredentials = new PipelinesApiDockerCredentials(account, token)
+  def apply(dockerCredentials: DockerCredentials): PipelinesApiDockerCredentials = apply(dockerCredentials.account, dockerCredentials.token, dockerCredentials.username, dockerCredentials.password)
+  def apply(account: String, token: String, username: Option[String], password: Option[String]): PipelinesApiDockerCredentials = new PipelinesApiDockerCredentials(account, token, username, password)
 }
 
 /**
  * Authentication information to pull docker images as the user.
  */
-case class PipelinesApiDockerCredentials(override val account: String, override val token: String) extends DockerCredentials(account, token) with PipelinesApiAuthObject {
+case class PipelinesApiDockerCredentials(override val account: String,
+                                         override val token: String,
+                                         override val username: Option[String],
+                                         override val password: Option[String]) extends DockerCredentials(account, token, username, password) with PipelinesApiAuthObject {
   override val context = "docker"
   override val map = Map(
     "account" -> JsString(account),
