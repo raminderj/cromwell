@@ -2,5 +2,7 @@
 dockerhub {
     account = "{{$cromwellDockerhub.Data.account}}"
     token = "{{$cromwellDockerhub.Data.token}}"
+    username = "{{$cromwellDockerhub.Data.username}}"
+    password = "{{$cromwellDockerhub.Data.password}}"
 }
 {{end}}
