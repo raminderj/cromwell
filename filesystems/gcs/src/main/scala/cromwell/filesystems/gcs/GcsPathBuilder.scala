@@ -3,7 +3,6 @@ package cromwell.filesystems.gcs
 import java.io._
 import java.net.URI
 import java.nio.channels.Channels
-import java.nio.charset.Charset
 import java.nio.file.NoSuchFileException
 
 import akka.actor.ActorSystem
@@ -25,7 +24,6 @@ import cromwell.core.path.{NioPath, Path, PathBuilder}
 import cromwell.filesystems.gcs.GcsPathBuilder._
 import cromwell.filesystems.gcs.GoogleUtil._
 import cromwell.filesystems.gcs.batch.{GcsBucketCache, GcsFileSystemCache}
-import cromwell.util.TryWithResource._
 import mouse.all._
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -247,44 +245,6 @@ case class GcsPath private[gcs](nioPath: NioPath,
       case Failure(e) => e.getMessage
         throw new IOException(s"Failed to open an input stream for $pathAsString: ${e.getMessage}", e)
     }
-  }
-
-  /***
-    * This method needs to be overridden to make it work with requester pays. We need to go around Nio
-    * as currently it doesn't support to set the billing project id. Google Cloud Storage already has
-    * code in place to set the billing project (inside HttpStorageRpc) but Nio does not pass it even though
-    * it's available. In future when it is supported, remove this method and wire billing project into code
-    * wherever necessary
-    */
-  override def readContentAsString(implicit codec: Codec): String = {
-    withInputStream(readLinesAsString)
-  }
-
-  private def readLinesAsString(inputStream: InputStream)(implicit codec: Codec): String = {
-    val byteArray = Stream.continually(inputStream.read).takeWhile(_ != -1).map(_.toByte).toArray
-    new String(byteArray, Charset.forName(codec.name))
-  }
-
-  /***
-    * This method needs to be overridden to make it work with requester pays. We need to go around Nio
-    * as currently it doesn't support to set the billing project id. Google Cloud Storage already has
-    * code in place to set the billing project (inside HttpStorageRpc) but Nio does not pass it even though
-    * it's available. In future when it is supported, remove this method and wire billing project into code
-    * wherever necessary
-    */
-  override def readAllLinesInFile(implicit codec: Codec): Traversable[String] = withInputStream { is =>
-    val reader = new BufferedReader(new InputStreamReader(is, codec.name))
-    Stream.continually(reader.readLine()).takeWhile(_ != null).toList
-  }
-
-  /*
-   * The input stream will be closed when this method returns, which means the f function
-   * cannot leak an open stream.
-   */
-  private def withInputStream[A](f: InputStream => A): A = {
-    tryWithResource(() => mediaInputStream)(inputStream => f(inputStream)).recoverWith({
-      case failure => Failure(new IOException(s"Failed to open an input stream for $pathAsString", failure))
-    }).get
   }
 
   override def pathWithoutScheme: String = {

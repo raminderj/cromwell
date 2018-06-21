@@ -90,8 +90,4 @@ trait EvenBetterPathMethods {
   def mediaInputStream: InputStream = newInputStream
 
   def writeContent(content: String)(openOptions: OpenOptions, codec: Codec): this.type = write(content)(openOptions, Codec.UTF8)
-
-  def readContentAsString(implicit codec: Codec): String = contentAsString
-
-  def readAllLinesInFile(implicit codec: Codec): Traversable[String] = lines
 }
